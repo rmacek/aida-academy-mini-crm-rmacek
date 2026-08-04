@@ -137,54 +137,50 @@ try {
     );
     dbWrapper.run(
       'INSERT INTO notes (id, tenantId, salesOpportunityId, title, content) VALUES (?, ?, ?, ?, ?)',
-      ['note-1', 'tenant-nordstern', 'opp-1', 'Key stakeholders', 'Identified key decision makers at Nordstern']
+      ['note-1', 'tenant-nordstern', 'opp-1', 'Project requirements', 'Client wants to implement a new CRM system with AI integration']
     );
     dbWrapper.run(
       'INSERT INTO documents (id, tenantId, salesOpportunityId, name, description, contentType, fileSize) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      ['doc-1', 'tenant-nordstern', 'opp-1', 'Project Charter.pdf', 'Initial project charter document', 'application/pdf', 102400]
-    );
-    dbWrapper.run(
-      'INSERT INTO conversations (id, tenantId, salesOpportunityId, title) VALUES (?, ?, ?, ?)',
-      ['conv-1', 'tenant-nordstern', 'opp-1', 'Initial Discussion']
-    );
-    dbWrapper.run(
-      'INSERT INTO artifacts (id, tenantId, salesOpportunityId, conversationId, name, type, content) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      ['art-1', 'tenant-nordstern', 'opp-1', 'conv-1', 'Meeting Notes', 'text/plain', 'Initial notes from kickoff meeting']
+      ['doc-1', 'tenant-nordstern', 'opp-1', 'Project Brief', 'Initial project brief document', 'application/pdf', 10240]
     );
 
     // Insert Alpenblick tenant data
     dbWrapper.run(
       'INSERT INTO salesOpportunities (id, tenantId, name, description, status) VALUES (?, ?, ?, ?, ?)',
-      ['opp-2', 'tenant-alpenblick', 'Alpenblick Mountain Resort Development', 'Development project for mountain resort', 'open']
+      ['opp-2', 'tenant-alpenblick', 'Alpenblick Sales Expansion', 'Sales expansion project for Alpenblick', 'open']
     );
     dbWrapper.run(
       'INSERT INTO appointments (id, tenantId, salesOpportunityId, title, description, startTime, endTime) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      ['apt-2', 'tenant-alpenblick', 'opp-2', 'Site Visit', 'Visit to mountain resort site', '2023-06-20T14:00:00Z', '2023-06-20T16:00:00Z']
+      ['apt-2', 'tenant-alpenblick', 'opp-2', 'Market Analysis Meeting', 'Meeting to analyze market conditions', '2023-06-10T14:00:00Z', '2023-06-10T15:00:00Z']
     );
     dbWrapper.run(
       'INSERT INTO todos (id, tenantId, salesOpportunityId, title, description, completed) VALUES (?, ?, ?, ?, ?, ?)',
-      ['todo-2', 'tenant-alpenblick', 'opp-2', 'Research local regulations', 'Investigate zoning laws for resort development', false]
+      ['todo-2', 'tenant-alpenblick', 'opp-2', 'Research competitors', 'Analyze competitor offerings', false]
     );
     dbWrapper.run(
       'INSERT INTO notes (id, tenantId, salesOpportunityId, title, content) VALUES (?, ?, ?, ?, ?)',
-      ['note-2', 'tenant-alpenblick', 'opp-2', 'Environmental concerns', 'Addressing environmental impact assessment']
+      ['note-2', 'tenant-alpenblick', 'opp-2', 'Key insights', 'Important market trends identified during research']
     );
     dbWrapper.run(
       'INSERT INTO documents (id, tenantId, salesOpportunityId, name, description, contentType, fileSize) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      ['doc-2', 'tenant-alpenblick', 'opp-2', 'Site Analysis Report.pdf', 'Detailed site analysis report', 'application/pdf', 204800]
+      ['doc-2', 'tenant-alpenblick', 'opp-2', 'Market Analysis Report', 'Comprehensive market analysis report', 'application/pdf', 15360]
     );
+
+    // Create initial conversations and artifacts for demo purposes
     dbWrapper.run(
       'INSERT INTO conversations (id, tenantId, salesOpportunityId, title) VALUES (?, ?, ?, ?)',
-      ['conv-2', 'tenant-alpenblick', 'opp-2', 'Development Planning']
+      ['conv-1', 'tenant-nordstern', 'opp-1', 'Project Planning Discussion']
     );
+
     dbWrapper.run(
       'INSERT INTO artifacts (id, tenantId, salesOpportunityId, conversationId, name, type, content) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      ['art-2', 'tenant-alpenblick', 'opp-2', 'conv-2', 'Project Outline', 'text/plain', 'Initial project outline']
+      ['artifact-1', 'tenant-nordstern', 'opp-1', 'conv-1', 'Initial Plan Summary', 'text', 'Based on our discussion, we propose to implement a CRM system with AI capabilities in three phases. Phase 1 focuses on core functionality, phase 2 adds AI features, and phase 3 implements advanced analytics.']
     );
   }
 } catch (error) {
   console.error('Database initialization error:', error);
-  throw error;
 }
 
-export { dbWrapper as db };
+export function getDb() {
+  return dbWrapper;
+}

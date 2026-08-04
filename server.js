@@ -1,258 +1,270 @@
 import { createServer } from 'node:http';
 import { parse } from 'node:url';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { database } from './database.js';
-import { aidaAdapter } from './aida-adapter.js';
+import { createAidaAdapter } from './aida-adapter.js';
+import { getDb } from './database.js';
 
 const PORT = process.env.PORT || 3000;
-const AIDA_BASE_URL = process.env.AIDA_BASE_URL;
-const AIDA_BEARER_TOKEN = process.env.AIDA_BEARER_TOKEN;
-
-const aidaClient = aidaAdapter(AIDA_BASE_URL, AIDA_BEARER_TOKEN);
+const aidaAdapter = createAidaAdapter();
 
 const server = createServer(async (req, res) => {
   const url = parse(req.url, true);
-  const { pathname, query } = url;
+  const db = getDb();
 
   // Set security headers
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-XSS-Protection', '1; mode=block');
-  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
 
-  if (req.method === 'GET' && pathname === '/') {
-    res.setHeader('Content-Type', 'text/html');
-    const html = readFileSync(join(process.cwd(), 'ui/index.html'), 'utf-8');
-    res.end(html);
-    return;
-  }
-
-  if (req.method === 'GET' && pathname.startsWith('/api/')) {
-    try {
-      const pathParts = pathname.split('/').filter(Boolean);
-      const resource = pathParts[1];
-      const id = pathParts[2];
-
-      // Validate tenant and opportunity scope from query or headers
-      const tenantId = query.tenantId || req.headers['x-tenant-id'];
-      const salesOpportunityId = query.salesOpportunityId || req.headers['x-sales-opportunity-id'];
-
-      if (!tenantId || !salesOpportunityId) {
-        res.statusCode = 400;
-        res.end(JSON.stringify({ error: 'Missing tenantId or salesOpportunityId' }));
-        return;
-      }
-
-      const db = database();
-
-      // Verify scope
-      if (resource === 'opportunities') {
-        const opportunity = await db.get(
-          'SELECT id FROM salesOpportunities WHERE id = ? AND tenantId = ?',
-          [id, tenantId]
-        );
-
-        if (!opportunity) {
-          res.statusCode = 404;
-          res.end(JSON.stringify({ error: 'Sales opportunity not found' }));
-          return;
-        }
-      }
-
-      // Proceed with API logic based on resource type
-      switch (resource) {
-        case 'opportunities':
-          if (req.method === 'GET') {
-            const opportunities = await db.all(
-              'SELECT * FROM salesOpportunities WHERE tenantId = ?',
-              [tenantId]
-            );
-            res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify(opportunities));
-          }
-          break;
-
-        case 'appointments':
-          if (req.method === 'GET') {
-            const appointments = await db.all(
-              'SELECT * FROM appointments WHERE tenantId = ? AND salesOpportunityId = ?',
-              [tenantId, salesOpportunityId]
-            );
-            res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify(appointments));
-          }
-          break;
-
-        case 'todos':
-          if (req.method === 'GET') {
-            const todos = await db.all(
-              'SELECT * FROM todos WHERE tenantId = ? AND salesOpportunityId = ?',
-              [tenantId, salesOpportunityId]
-            );
-            res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify(todos));
-          }
-          break;
-
-        case 'notes':
-          if (req.method === 'GET') {
-            const notes = await db.all(
-              'SELECT * FROM notes WHERE tenantId = ? AND salesOpportunityId = ?',
-              [tenantId, salesOpportunityId]
-            );
-            res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify(notes));
-          }
-          break;
-
-        case 'documents':
-          if (req.method === 'GET') {
-            const documents = await db.all(
-              'SELECT * FROM documents WHERE tenantId = ? AND salesOpportunityId = ?',
-              [tenantId, salesOpportunityId]
-            );
-            res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify(documents));
-          }
-          break;
-
-        case 'conversations':
-          if (req.method === 'GET') {
-            const conversations = await db.all(
-              'SELECT * FROM conversations WHERE tenantId = ? AND salesOpportunityId = ?',
-              [tenantId, salesOpportunityId]
-            );
-            res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify(conversations));
-          }
-          break;
-
-        case 'artifacts':
-          if (req.method === 'GET') {
-            const artifacts = await db.all(
-              'SELECT * FROM artifacts WHERE tenantId = ? AND salesOpportunityId = ?',
-              [tenantId, salesOpportunityId]
-            );
-            res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify(artifacts));
-          }
-          break;
-
-        default:
-          res.statusCode = 404;
-          res.end(JSON.stringify({ error: 'Resource not found' }));
-      }
-    } catch (error) {
-      console.error('API Error:', error);
-      res.statusCode = 500;
-      res.end(JSON.stringify({ error: 'Internal server error' }));
+  try {
+    if (req.method === 'GET' && url.pathname === '/') {
+      // Serve the main HTML page
+      const fs = await import('node:fs');
+      const html = fs.readFileSync('./ui/index.html', 'utf8');
+      res.setHeader('Content-Type', 'text/html');
+      res.writeHead(200);
+      res.end(html);
+    } else if (req.method === 'GET' && url.pathname.startsWith('/api/')) {
+      await handleApiRequest(req, res, db, url);
+    } else if (req.method === 'POST' && url.pathname.startsWith('/api/')) {
+      await handleApiPostRequest(req, res, db, url);
+    } else {
+      // Serve static files
+      const serveStatic = await import('./ui/app.js');
+      res.writeHead(404);
+      res.end('Not Found');
     }
+  } catch (error) {
+    console.error(error);
+    res.writeHead(500);
+    res.end('Internal Server Error');
+  }
+});
+
+async function handleApiRequest(req, res, db, url) {
+  const { pathname } = url;
+  const pathParts = pathname.split('/').filter(Boolean);
+
+  // Extract tenantId and salesOpportunityId from URL
+  if (pathParts.length < 3 || pathParts[0] !== 'api' || pathParts[1] !== 'tenants') {
+    res.writeHead(400);
+    res.end('Invalid API endpoint');
     return;
   }
 
-  if (req.method === 'POST' && pathname.startsWith('/api/chat/')) {
-    try {
-      const pathParts = pathname.split('/').filter(Boolean);
-      const conversationId = pathParts[3];
+  const tenantId = pathParts[2];
+  const salesOpportunityId = pathParts[4];
 
-      // Validate tenant and opportunity scope from headers
-      const tenantId = req.headers['x-tenant-id'];
-      const salesOpportunityId = req.headers['x-sales-opportunity-id'];
+  // Validate that tenant and opportunity exist
+  const opportunity = db.get(
+    'SELECT * FROM salesOpportunities WHERE id = ? AND tenantId = ?',
+    [salesOpportunityId, tenantId]
+  );
 
-      if (!tenantId || !salesOpportunityId) {
-        res.statusCode = 400;
-        res.end(JSON.stringify({ error: 'Missing tenantId or salesOpportunityId' }));
-        return;
-      }
+  if (!opportunity) {
+    res.writeHead(404);
+    res.end('Sales opportunity not found');
+    return;
+  }
 
-      // Verify conversation exists and belongs to the opportunity
-      const db = database();
-      const conversation = await db.get(
-        'SELECT id, aidaConversationId FROM conversations WHERE id = ? AND tenantId = ? AND salesOpportunityId = ?',
-        [conversationId, tenantId, salesOpportunityId]
+  // Handle conversation requests
+  if (pathParts[5] === 'conversations') {
+    if (pathParts.length === 7 && pathParts[6] === 'chat') {
+      // GET /api/tenants/{tenantId}/opportunities/{opportunityId}/conversations/{conversationId}/chat
+      const conversationId = pathParts[6];
+
+      // Validate conversation exists and belongs to this opportunity
+      const conversation = db.get(
+        'SELECT * FROM conversations WHERE id = ? AND salesOpportunityId = ?',
+        [conversationId, salesOpportunityId]
       );
 
       if (!conversation) {
-        res.statusCode = 404;
-        res.end(JSON.stringify({ error: 'Conversation not found' }));
+        res.writeHead(404);
+        res.end('Conversation not found');
         return;
       }
 
-      // Get opportunity and artifacts for prompt building
-      const opportunity = await db.get(
-        'SELECT * FROM salesOpportunities WHERE id = ? AND tenantId = ?',
-        [salesOpportunityId, tenantId]
+      // Get conversation messages
+      const messages = db.all(
+        'SELECT * FROM artifacts WHERE conversationId = ? ORDER BY createdAt ASC',
+        [conversationId]
       );
-
-      if (!opportunity) {
-        res.statusCode = 404;
-        res.end(JSON.stringify({ error: 'Sales opportunity not found' }));
-        return;
-      }
-
-      const artifacts = await db.all(
-        'SELECT * FROM artifacts WHERE conversationId = ? AND tenantId = ? AND salesOpportunityId = ?',
-        [conversationId, tenantId, salesOpportunityId]
-      );
-
-      // Build prompt from opportunity and artifacts
-      let prompt = `Sales Opportunity: ${opportunity.title}\n\n`;
-
-      if (artifacts.length > 0) {
-        prompt += 'Relevant Artifacts:\n';
-        for (const artifact of artifacts) {
-          prompt += `- ${artifact.type}: ${artifact.content}\n`;
-        }
-        prompt += '\n';
-      }
-
-      // Add opportunity details to prompt
-      prompt += `Opportunity Status: ${opportunity.status}\n`;
-
-      if (opportunity.createdAt) {
-        prompt += `Created At: ${opportunity.createdAt}\n`;
-      }
-
-      // Get conversation history from AIDA if available
-      let responseText = '';
-      if (conversation.aidaConversationId) {
-        const result = await aidaClient.chat(conversation.aidaConversationId, prompt);
-        responseText = result.response || 'No response from AIDA';
-      } else {
-        // If no AIDA conversation exists, create one
-        const result = await aidaClient.chat('new-conversation', prompt);
-        responseText = result.response || 'No response from AIDA';
-
-        // Update the conversation with AIDA conversation ID
-        await db.run(
-          'UPDATE conversations SET aidaConversationId = ? WHERE id = ?',
-          [result.conversationId, conversationId]
-        );
-      }
 
       res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ response: responseText }));
-    } catch (error) {
-      console.error('Chat API Error:', error);
+      res.writeHead(200);
+      res.end(JSON.stringify({ messages }));
+    } else {
+      // GET /api/tenants/{tenantId}/opportunities/{opportunityId}/conversations
+      const conversations = db.all(
+        'SELECT * FROM conversations WHERE salesOpportunityId = ?',
+        [salesOpportunityId]
+      );
 
-      if (error.message.includes('AIDA service not configured')) {
-        res.statusCode = 503;
-        res.end(JSON.stringify({ error: 'AIDA service unavailable' }));
-        return;
-      }
-
-      res.statusCode = 500;
-      res.end(JSON.stringify({ error: 'Internal server error' }));
+      res.setHeader('Content-Type', 'application/json');
+      res.writeHead(200);
+      res.end(JSON.stringify({ conversations }));
     }
+  } else if (pathParts[5] === 'artifacts') {
+    // GET /api/tenants/{tenantId}/opportunities/{opportunityId}/artifacts
+    const artifacts = db.all(
+      'SELECT * FROM artifacts WHERE salesOpportunityId = ?',
+      [salesOpportunityId]
+    );
+
+    res.setHeader('Content-Type', 'application/json');
+    res.writeHead(200);
+    res.end(JSON.stringify({ artifacts }));
+  }
+}
+
+async function handleApiPostRequest(req, res, db, url) {
+  const { pathname } = url;
+  const pathParts = pathname.split('/').filter(Boolean);
+
+  // Extract tenantId and salesOpportunityId from URL
+  if (pathParts.length < 3 || pathParts[0] !== 'api' || pathParts[1] !== 'tenants') {
+    res.writeHead(400);
+    res.end('Invalid API endpoint');
     return;
   }
 
-  // Handle 404 for all other routes
-  res.statusCode = 404;
-  res.setHeader('Content-Type', 'application/json');
-  res.end(JSON.stringify({ error: 'Not found' }));
-});
+  const tenantId = pathParts[2];
+  const salesOpportunityId = pathParts[4];
+
+  // Validate that tenant and opportunity exist
+  const opportunity = db.get(
+    'SELECT * FROM salesOpportunities WHERE id = ? AND tenantId = ?',
+    [salesOpportunityId, tenantId]
+  );
+
+  if (!opportunity) {
+    res.writeHead(404);
+    res.end('Sales opportunity not found');
+    return;
+  }
+
+  // Handle conversation creation
+  if (pathParts[5] === 'conversations') {
+    if (pathParts.length === 7 && pathParts[6] === 'chat') {
+      // POST /api/tenants/{tenantId}/opportunities/{opportunityId}/conversations/{conversationId}/chat
+      const conversationId = pathParts[7];
+
+      // Validate conversation exists and belongs to this opportunity
+      const conversation = db.get(
+        'SELECT * FROM conversations WHERE id = ? AND salesOpportunityId = ?',
+        [conversationId, salesOpportunityId]
+      );
+
+      if (!conversation) {
+        res.writeHead(404);
+        res.end('Conversation not found');
+        return;
+      }
+
+      // Parse request body
+      let body = '';
+      req.on('data', chunk => {
+        body += chunk.toString();
+      });
+
+      req.on('end', async () => {
+        try {
+          const data = JSON.parse(body);
+          const messages = data.messages;
+
+          // Send messages to AIDA
+          const response = await aidaAdapter.chat(tenantId, salesOpportunityId, conversationId, messages);
+
+          if (response.error) {
+            res.writeHead(response.statusCode || 500);
+            res.end(JSON.stringify({ error: response.error }));
+            return;
+          }
+
+          // Store result as artifact
+          const artifactId = `artifact-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+          db.run(
+            'INSERT INTO artifacts (id, tenantId, salesOpportunityId, conversationId, name, type, content) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [artifactId, tenantId, salesOpportunityId, conversationId, 'AI Response', 'text', response.result]
+          );
+
+          res.setHeader('Content-Type', 'application/json');
+          res.writeHead(200);
+          res.end(JSON.stringify({ success: true, artifactId }));
+        } catch (error) {
+          console.error(error);
+          res.writeHead(400);
+          res.end('Invalid request body');
+        }
+      });
+    } else {
+      // POST /api/tenants/{tenantId}/opportunities/{opportunityId}/conversations
+      let body = '';
+      req.on('data', chunk => {
+        body += chunk.toString();
+      });
+
+      req.on('end', () => {
+        try {
+          const data = JSON.parse(body);
+          const { title } = data;
+
+          // Create conversation
+          const conversationId = `conv-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+          db.run(
+            'INSERT INTO conversations (id, tenantId, salesOpportunityId, title) VALUES (?, ?, ?, ?)',
+            [conversationId, tenantId, salesOpportunityId, title]
+          );
+
+          res.setHeader('Content-Type', 'application/json');
+          res.writeHead(201);
+          res.end(JSON.stringify({ conversationId }));
+        } catch (error) {
+          console.error(error);
+          res.writeHead(400);
+          res.end('Invalid request body');
+        }
+      });
+    }
+  } else if (pathParts[5] === 'artifacts') {
+    // POST /api/tenants/{tenantId}/opportunities/{opportunityId}/artifacts
+    let body = '';
+    req.on('data', chunk => {
+      body += chunk.toString();
+    });
+
+    req.on('end', async () => {
+      try {
+        const data = JSON.parse(body);
+        const { prompt, type } = data;
+
+        // Generate artifact using AIDA
+        const response = await aidaAdapter.generateArtifact(tenantId, salesOpportunityId, null, prompt, type);
+
+        if (response.error) {
+          res.writeHead(response.statusCode || 500);
+          res.end(JSON.stringify({ error: response.error }));
+          return;
+        }
+
+        // Store generated artifact
+        const artifactId = `artifact-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+        db.run(
+          'INSERT INTO artifacts (id, tenantId, salesOpportunityId, name, type, content) VALUES (?, ?, ?, ?, ?, ?)',
+          [artifactId, tenantId, salesOpportunityId, `Generated ${type}`, type, response.result]
+        );
+
+        res.setHeader('Content-Type', 'application/json');
+        res.writeHead(201);
+        res.end(JSON.stringify({ artifactId }));
+      } catch (error) {
+        console.error(error);
+        res.writeHead(400);
+        res.end('Invalid request body');
+      }
+    });
+  }
+}
 
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
