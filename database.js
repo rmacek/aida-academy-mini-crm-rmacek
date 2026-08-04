@@ -3,9 +3,36 @@ import { DatabaseSync } from 'node:sqlite';
 const DB_PATH = './db/crm.db';
 const db = new DatabaseSync(DB_PATH);
 
+// Wrap DatabaseSync to provide scalar, get, all, run and exec methods
+const dbWrapper = {
+  scalar: (sql, ...params) => {
+    const stmt = db.prepare(sql);
+    return stmt.value(...params);
+  },
+
+  get: (sql, ...params) => {
+    const stmt = db.prepare(sql);
+    return stmt.get(...params);
+  },
+
+  all: (sql, ...params) => {
+    const stmt = db.prepare(sql);
+    return stmt.all(...params);
+  },
+
+  run: (sql, ...params) => {
+    const stmt = db.prepare(sql);
+    return stmt.run(...params);
+  },
+
+  exec: (sql) => {
+    return db.exec(sql);
+  }
+};
+
 // Initialize schema if not exists
 try {
-  db.exec(`
+  dbWrapper.exec(`
     CREATE TABLE IF NOT EXISTS salesOpportunities (
       id TEXT PRIMARY KEY,
       tenantId TEXT NOT NULL,
@@ -93,66 +120,66 @@ try {
   `);
 
   // Seed data if tables are empty
-  const opportunityCount = db.scalar('SELECT COUNT(*) FROM salesOpportunities');
+  const opportunityCount = dbWrapper.scalar('SELECT COUNT(*) FROM salesOpportunities');
   if (opportunityCount === 0) {
     // Insert Nordstern tenant data
-    db.run(
+    dbWrapper.run(
       'INSERT INTO salesOpportunities (id, tenantId, name, description, status) VALUES (?, ?, ?, ?, ?)',
       ['opp-1', 'tenant-nordstern', 'Nordstern Consulting Project', 'Consulting project for Nordstern', 'open']
     );
-    db.run(
+    dbWrapper.run(
       'INSERT INTO appointments (id, tenantId, salesOpportunityId, title, description, startTime, endTime) VALUES (?, ?, ?, ?, ?, ?, ?)',
       ['apt-1', 'tenant-nordstern', 'opp-1', 'Project Kickoff Meeting', 'Initial project kickoff', '2023-05-15T09:00:00Z', '2023-05-15T10:00:00Z']
     );
-    db.run(
+    dbWrapper.run(
       'INSERT INTO todos (id, tenantId, salesOpportunityId, title, description, completed) VALUES (?, ?, ?, ?, ?, ?)',
       ['todo-1', 'tenant-nordstern', 'opp-1', 'Prepare project proposal', 'Draft initial project proposal document', false]
     );
-    db.run(
+    dbWrapper.run(
       'INSERT INTO notes (id, tenantId, salesOpportunityId, title, content) VALUES (?, ?, ?, ?, ?)',
       ['note-1', 'tenant-nordstern', 'opp-1', 'Key stakeholders', 'Identified key decision makers at Nordstern']
     );
-    db.run(
+    dbWrapper.run(
       'INSERT INTO documents (id, tenantId, salesOpportunityId, name, description, contentType, fileSize) VALUES (?, ?, ?, ?, ?, ?, ?)',
       ['doc-1', 'tenant-nordstern', 'opp-1', 'Project Charter.pdf', 'Initial project charter document', 'application/pdf', 102400]
     );
-    db.run(
+    dbWrapper.run(
       'INSERT INTO conversations (id, tenantId, salesOpportunityId, title) VALUES (?, ?, ?, ?)',
       ['conv-1', 'tenant-nordstern', 'opp-1', 'Initial Discussion']
     );
-    db.run(
+    dbWrapper.run(
       'INSERT INTO artifacts (id, tenantId, salesOpportunityId, conversationId, name, type, content) VALUES (?, ?, ?, ?, ?, ?, ?)',
       ['art-1', 'tenant-nordstern', 'opp-1', 'conv-1', 'Meeting Notes', 'text/plain', 'Initial notes from kickoff meeting']
     );
 
     // Insert Alpenblick tenant data
-    db.run(
+    dbWrapper.run(
       'INSERT INTO salesOpportunities (id, tenantId, name, description, status) VALUES (?, ?, ?, ?, ?)',
       ['opp-2', 'tenant-alpenblick', 'Alpenblick Mountain Resort Development', 'Development project for mountain resort', 'open']
     );
-    db.run(
+    dbWrapper.run(
       'INSERT INTO appointments (id, tenantId, salesOpportunityId, title, description, startTime, endTime) VALUES (?, ?, ?, ?, ?, ?, ?)',
       ['apt-2', 'tenant-alpenblick', 'opp-2', 'Site Visit', 'Visit to mountain resort site', '2023-06-20T14:00:00Z', '2023-06-20T16:00:00Z']
     );
-    db.run(
+    dbWrapper.run(
       'INSERT INTO todos (id, tenantId, salesOpportunityId, title, description, completed) VALUES (?, ?, ?, ?, ?, ?)',
       ['todo-2', 'tenant-alpenblick', 'opp-2', 'Research local regulations', 'Investigate zoning laws for resort development', false]
     );
-    db.run(
+    dbWrapper.run(
       'INSERT INTO notes (id, tenantId, salesOpportunityId, title, content) VALUES (?, ?, ?, ?, ?)',
       ['note-2', 'tenant-alpenblick', 'opp-2', 'Environmental concerns', 'Addressing environmental impact assessment']
     );
-    db.run(
+    dbWrapper.run(
       'INSERT INTO documents (id, tenantId, salesOpportunityId, name, description, contentType, fileSize) VALUES (?, ?, ?, ?, ?, ?, ?)',
       ['doc-2', 'tenant-alpenblick', 'opp-2', 'Site Analysis Report.pdf', 'Detailed site analysis report', 'application/pdf', 204800]
     );
-    db.run(
+    dbWrapper.run(
       'INSERT INTO conversations (id, tenantId, salesOpportunityId, title) VALUES (?, ?, ?, ?)',
       ['conv-2', 'tenant-alpenblick', 'opp-2', 'Development Planning']
     );
-    db.run(
+    dbWrapper.run(
       'INSERT INTO artifacts (id, tenantId, salesOpportunityId, conversationId, name, type, content) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      ['art-2', 'tenant-alpenblick', 'opp-2', 'conv-2', 'Project Outline', 'text/plain', 'Initial project outline document']
+      ['art-2', 'tenant-alpenblick', 'opp-2', 'conv-2', 'Project Outline', 'text/plain', 'Initial project outline']
     );
   }
 } catch (error) {
@@ -160,22 +187,4 @@ try {
   throw error;
 }
 
-export function database() {
-  return {
-    get(sql, params = []) {
-      const stmt = db.prepare(sql);
-      return stmt.get(...params);
-    },
-    all(sql, params = []) {
-      const stmt = db.prepare(sql);
-      return stmt.all(...params);
-    },
-    run(sql, params = []) {
-      const stmt = db.prepare(sql);
-      return stmt.run(...params);
-    },
-    prepare(sql) {
-      return db.prepare(sql);
-    }
-  };
-}
+export { dbWrapper as db };
