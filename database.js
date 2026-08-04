@@ -1,30 +1,19 @@
-import { open } from 'node:sqlite';
-import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 
-const dbPath = join(process.cwd(), 'db.sqlite');
+const DB_PATH = './db/crm.db';
+const db = new DatabaseSync(DB_PATH);
 
-export function database() {
-  const db = open(dbPath, { mode: open.CREATE | open.READWRITE });
-  return db;
-}
-
-// Initialize schema and seed data
-export async function initDatabase() {
-  const db = database();
-
-  await db.exec(`
-    CREATE TABLE IF NOT EXISTS tenants (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL
-    );
-
+// Initialize schema if not exists
+try {
+  db.exec(`
     CREATE TABLE IF NOT EXISTS salesOpportunities (
       id TEXT PRIMARY KEY,
       tenantId TEXT NOT NULL,
-      title TEXT NOT NULL,
-      status TEXT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT,
+      status TEXT DEFAULT 'open',
       createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (tenantId) REFERENCES tenants(id)
+      updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS appointments (
@@ -32,8 +21,11 @@ export async function initDatabase() {
       tenantId TEXT NOT NULL,
       salesOpportunityId TEXT NOT NULL,
       title TEXT NOT NULL,
-      date DATETIME NOT NULL,
-      FOREIGN KEY (tenantId) REFERENCES tenants(id),
+      description TEXT,
+      startTime DATETIME NOT NULL,
+      endTime DATETIME NOT NULL,
+      createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (salesOpportunityId) REFERENCES salesOpportunities(id)
     );
 
@@ -42,8 +34,11 @@ export async function initDatabase() {
       tenantId TEXT NOT NULL,
       salesOpportunityId TEXT NOT NULL,
       title TEXT NOT NULL,
+      description TEXT,
       completed BOOLEAN DEFAULT FALSE,
-      FOREIGN KEY (tenantId) REFERENCES tenants(id),
+      dueDate DATETIME,
+      createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (salesOpportunityId) REFERENCES salesOpportunities(id)
     );
 
@@ -51,9 +46,10 @@ export async function initDatabase() {
       id TEXT PRIMARY KEY,
       tenantId TEXT NOT NULL,
       salesOpportunityId TEXT NOT NULL,
-      content TEXT NOT NULL,
+      title TEXT NOT NULL,
+      content TEXT,
       createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (tenantId) REFERENCES tenants(id),
+      updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (salesOpportunityId) REFERENCES salesOpportunities(id)
     );
 
@@ -62,9 +58,12 @@ export async function initDatabase() {
       tenantId TEXT NOT NULL,
       salesOpportunityId TEXT NOT NULL,
       name TEXT NOT NULL,
-      url TEXT NOT NULL,
+      description TEXT,
+      contentType TEXT,
+      fileSize INTEGER,
+      uploadDate DATETIME DEFAULT CURRENT_TIMESTAMP,
       createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (tenantId) REFERENCES tenants(id),
+      updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (salesOpportunityId) REFERENCES salesOpportunities(id)
     );
 
@@ -73,9 +72,8 @@ export async function initDatabase() {
       tenantId TEXT NOT NULL,
       salesOpportunityId TEXT NOT NULL,
       title TEXT NOT NULL,
-      aidaConversationId TEXT,
       createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (tenantId) REFERENCES tenants(id),
+      updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (salesOpportunityId) REFERENCES salesOpportunities(id)
     );
 
@@ -84,40 +82,100 @@ export async function initDatabase() {
       tenantId TEXT NOT NULL,
       salesOpportunityId TEXT NOT NULL,
       conversationId TEXT NOT NULL,
+      name TEXT NOT NULL,
       type TEXT NOT NULL,
-      content TEXT NOT NULL,
+      content TEXT,
       createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (tenantId) REFERENCES tenants(id),
+      updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (salesOpportunityId) REFERENCES salesOpportunities(id),
       FOREIGN KEY (conversationId) REFERENCES conversations(id)
     );
   `);
 
-  // Seed data
-  await db.run(`INSERT OR IGNORE INTO tenants (id, name) VALUES ('t-academy-rmacek', 'T-Academy RMACEK');`);
+  // Seed data if tables are empty
+  const opportunityCount = db.scalar('SELECT COUNT(*) FROM salesOpportunities');
+  if (opportunityCount === 0) {
+    // Insert Nordstern tenant data
+    db.run(
+      'INSERT INTO salesOpportunities (id, tenantId, name, description, status) VALUES (?, ?, ?, ?, ?)',
+      ['opp-1', 'tenant-nordstern', 'Nordstern Consulting Project', 'Consulting project for Nordstern', 'open']
+    );
+    db.run(
+      'INSERT INTO appointments (id, tenantId, salesOpportunityId, title, description, startTime, endTime) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      ['apt-1', 'tenant-nordstern', 'opp-1', 'Project Kickoff Meeting', 'Initial project kickoff', '2023-05-15T09:00:00Z', '2023-05-15T10:00:00Z']
+    );
+    db.run(
+      'INSERT INTO todos (id, tenantId, salesOpportunityId, title, description, completed) VALUES (?, ?, ?, ?, ?, ?)',
+      ['todo-1', 'tenant-nordstern', 'opp-1', 'Prepare project proposal', 'Draft initial project proposal document', false]
+    );
+    db.run(
+      'INSERT INTO notes (id, tenantId, salesOpportunityId, title, content) VALUES (?, ?, ?, ?, ?)',
+      ['note-1', 'tenant-nordstern', 'opp-1', 'Key stakeholders', 'Identified key decision makers at Nordstern']
+    );
+    db.run(
+      'INSERT INTO documents (id, tenantId, salesOpportunityId, name, description, contentType, fileSize) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      ['doc-1', 'tenant-nordstern', 'opp-1', 'Project Charter.pdf', 'Initial project charter document', 'application/pdf', 102400]
+    );
+    db.run(
+      'INSERT INTO conversations (id, tenantId, salesOpportunityId, title) VALUES (?, ?, ?, ?)',
+      ['conv-1', 'tenant-nordstern', 'opp-1', 'Initial Discussion']
+    );
+    db.run(
+      'INSERT INTO artifacts (id, tenantId, salesOpportunityId, conversationId, name, type, content) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      ['art-1', 'tenant-nordstern', 'opp-1', 'conv-1', 'Meeting Notes', 'text/plain', 'Initial notes from kickoff meeting']
+    );
 
-  await db.run(`INSERT OR IGNORE INTO salesOpportunities (id, tenantId, title, status) VALUES
-    ('opp1-t-academy-rmacek', 't-academy-rmacek', 'Enterprise Software Deal', 'active'),
-    ('opp2-t-academy-rmacek', 't-academy-rmacek', 'Cloud Migration Project', 'closed');`);
-
-  await db.run(`INSERT OR IGNORE INTO appointments (id, tenantId, salesOpportunityId, title, date) VALUES
-    ('appt1-t-academy-rmacek', 't-academy-rmacek', 'opp1-t-academy-rmacek', 'Product Demo', '2023-06-15T10:00:00');`);
-
-  await db.run(`INSERT OR IGNORE INTO todos (id, tenantId, salesOpportunityId, title, completed) VALUES
-    ('todo1-t-academy-rmacek', 't-academy-rmacek', 'opp1-t-academy-rmacek', 'Prepare proposal draft', TRUE);`);
-
-  await db.run(`INSERT OR IGNORE INTO notes (id, tenantId, salesOpportunityId, content) VALUES
-    ('note1-t-academy-rmacek', 't-academy-rmacek', 'opp1-t-academy-rmacek', 'Client requested additional security features.');`);
-
-  await db.run(`INSERT OR IGNORE INTO documents (id, tenantId, salesOpportunityId, name, url) VALUES
-    ('doc1-t-academy-rmacek', 't-academy-rmacek', 'opp1-t-academy-rmacek', 'Technical Specification.pdf', '/docs/spec.pdf');`);
-
-  await db.run(`INSERT OR IGNORE INTO conversations (id, tenantId, salesOpportunityId, title, aidaConversationId) VALUES
-    ('conv1-t-academy-rmacek', 't-academy-rmacek', 'opp1-t-academy-rmacek', 'Product Discussion', 'conv-aidanord');`);
-
-  await db.run(`INSERT OR IGNORE INTO artifacts (id, tenantId, salesOpportunityId, conversationId, type, content) VALUES
-    ('art1-t-academy-rmacek', 't-academy-rmacek', 'opp1-t-academy-rmacek', 'conv1-t-academy-rmacek', 'summary', 'Client needs custom integration.');`);
+    // Insert Alpenblick tenant data
+    db.run(
+      'INSERT INTO salesOpportunities (id, tenantId, name, description, status) VALUES (?, ?, ?, ?, ?)',
+      ['opp-2', 'tenant-alpenblick', 'Alpenblick Mountain Resort Development', 'Development project for mountain resort', 'open']
+    );
+    db.run(
+      'INSERT INTO appointments (id, tenantId, salesOpportunityId, title, description, startTime, endTime) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      ['apt-2', 'tenant-alpenblick', 'opp-2', 'Site Visit', 'Visit to mountain resort site', '2023-06-20T14:00:00Z', '2023-06-20T16:00:00Z']
+    );
+    db.run(
+      'INSERT INTO todos (id, tenantId, salesOpportunityId, title, description, completed) VALUES (?, ?, ?, ?, ?, ?)',
+      ['todo-2', 'tenant-alpenblick', 'opp-2', 'Research local regulations', 'Investigate zoning laws for resort development', false]
+    );
+    db.run(
+      'INSERT INTO notes (id, tenantId, salesOpportunityId, title, content) VALUES (?, ?, ?, ?, ?)',
+      ['note-2', 'tenant-alpenblick', 'opp-2', 'Environmental concerns', 'Addressing environmental impact assessment']
+    );
+    db.run(
+      'INSERT INTO documents (id, tenantId, salesOpportunityId, name, description, contentType, fileSize) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      ['doc-2', 'tenant-alpenblick', 'opp-2', 'Site Analysis Report.pdf', 'Detailed site analysis report', 'application/pdf', 204800]
+    );
+    db.run(
+      'INSERT INTO conversations (id, tenantId, salesOpportunityId, title) VALUES (?, ?, ?, ?)',
+      ['conv-2', 'tenant-alpenblick', 'opp-2', 'Development Planning']
+    );
+    db.run(
+      'INSERT INTO artifacts (id, tenantId, salesOpportunityId, conversationId, name, type, content) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      ['art-2', 'tenant-alpenblick', 'opp-2', 'conv-2', 'Project Outline', 'text/plain', 'Initial project outline document']
+    );
+  }
+} catch (error) {
+  console.error('Database initialization error:', error);
+  throw error;
 }
 
-// Initialize on module load
-initDatabase();
+export function database() {
+  return {
+    get(sql, params = []) {
+      const stmt = db.prepare(sql);
+      return stmt.get(...params);
+    },
+    all(sql, params = []) {
+      const stmt = db.prepare(sql);
+      return stmt.all(...params);
+    },
+    run(sql, params = []) {
+      const stmt = db.prepare(sql);
+      return stmt.run(...params);
+    },
+    prepare(sql) {
+      return db.prepare(sql);
+    }
+  };
+}
