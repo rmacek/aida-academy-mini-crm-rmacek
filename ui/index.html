@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mini CRM</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="context-header" id="contextHeader">
+    <div class="header-content">
+      <h1>Mini CRM</h1>
+      <div class="context-info">
+        <span class="tenant-id">Tenant: <span id="tenantId"></span></span>
+        <span class="opportunity-id">Opportunity: <span id="salesOpportunityId"></span></span>
+      </div>
+      <button class="switcher-btn" aria-label="Switch Opportunity" id="switcherBtn">Switch</button>
+    </div>
+  </header>
+
+  <main class="app-container">
+    <nav class="tabs">
+      <button class="tab-button active" data-tab="activities">Activities</button>
+      <button class="tab-button" data-tab="documents">Documents</button>
+      <button class="tab-button" data-tab="conversations">Conversations</button>
+      <button class="tab-button" data-tab="artifacts">Artifacts</button>
+    </nav>
+
+    <div class="tab-content active" id="activitiesTab">
+      <h2>Activities</h2>
+      <div id="activitiesList"></div>
+    </div>
+
+    <div class="tab-content" id="documentsTab">
+      <h2>Documents</h2>
+      <div id="documentsList"></div>
+    </div>
+
+    <div class="tab-content" id="conversationsTab">
+      <h2>Conversations</h2>
+      <div id="conversationsList"></div>
+    </div>
+
+    <div class="tab-content" id="artifactsTab">
+      <h2>Artifacts</h2>
+      <div id="artifactsList"></div>
+    </div>
+  </main>
+
+  <!-- Switcher Dialog -->
+  <dialog id="switcherDialog" class="modal">
+    <h2>Select Opportunity</h2>
+    <div id="opportunitiesList"></div>
+    <button id="createNewBtn">Create New Opportunity</button>
+    <button id="closeDialogBtn">Close</button>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
