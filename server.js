@@ -209,7 +209,8 @@ export function createMiniCrmServer({
           `SELECT id, name, company, status, value_eur AS valueEur,
                   description, next_step AS nextStep, created_at AS createdAt
              FROM sales_opportunities
-            WHERE tenant_id = ? ORDER BY company`, tenantId);
+            WHERE tenant_id = ?
+            ORDER BY CASE WHEN id = 'opp-nordstern' THEN 0 ELSE 1 END, company`, tenantId);
         sendJson(res, 200, {
           tenant: { id: tenantId, name: tenantName },
           copilotConfigured: Boolean(aidaAdapter.isConfigured),
