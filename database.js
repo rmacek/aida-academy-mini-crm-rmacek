@@ -94,36 +94,29 @@ export async function initDatabase() {
   `);
 
   // Seed data
-  await db.run(`INSERT OR IGNORE INTO tenants (id, name) VALUES ('nordstern', 'Nordstern AG'), ('alpenblick', 'Alpenblick GmbH');`);
+  await db.run(`INSERT OR IGNORE INTO tenants (id, name) VALUES ('t-academy-rmacek', 'T-Academy RMACEK');`);
 
   await db.run(`INSERT OR IGNORE INTO salesOpportunities (id, tenantId, title, status) VALUES
-    ('opp1-nordstern', 'nordstern', 'Enterprise Software Deal', 'active'),
-    ('opp2-nordstern', 'nordstern', 'Cloud Migration Project', 'closed'),
-    ('opp1-alpenblick', 'alpenblick', 'Retail Chain Expansion', 'active');`);
+    ('opp1-t-academy-rmacek', 't-academy-rmacek', 'Enterprise Software Deal', 'active'),
+    ('opp2-t-academy-rmacek', 't-academy-rmacek', 'Cloud Migration Project', 'closed');`);
 
   await db.run(`INSERT OR IGNORE INTO appointments (id, tenantId, salesOpportunityId, title, date) VALUES
-    ('appt1-nordstern', 'nordstern', 'opp1-nordstern', 'Product Demo', '2023-06-15T10:00:00'),
-    ('appt2-alpenblick', 'alpenblick', 'opp1-alpenblick', 'Initial Meeting', '2023-07-20T14:30:00');`);
+    ('appt1-t-academy-rmacek', 't-academy-rmacek', 'opp1-t-academy-rmacek', 'Product Demo', '2023-06-15T10:00:00');`);
 
   await db.run(`INSERT OR IGNORE INTO todos (id, tenantId, salesOpportunityId, title, completed) VALUES
-    ('todo1-nordstern', 'nordstern', 'opp1-nordstern', 'Prepare proposal draft', TRUE),
-    ('todo2-alpenblick', 'alpenblick', 'opp1-alpenblick', 'Review contract terms', FALSE);`);
+    ('todo1-t-academy-rmacek', 't-academy-rmacek', 'opp1-t-academy-rmacek', 'Prepare proposal draft', TRUE);`);
 
   await db.run(`INSERT OR IGNORE INTO notes (id, tenantId, salesOpportunityId, content) VALUES
-    ('note1-nordstern', 'nordstern', 'opp1-nordstern', 'Client requested additional security features.'),
-    ('note2-alpenblick', 'alpenblick', 'opp1-alpenblick', 'Budget approved for Q3.');`);
+    ('note1-t-academy-rmacek', 't-academy-rmacek', 'opp1-t-academy-rmacek', 'Client requested additional security features.');`);
 
   await db.run(`INSERT OR IGNORE INTO documents (id, tenantId, salesOpportunityId, name, url) VALUES
-    ('doc1-nordstern', 'nordstern', 'opp1-nordstern', 'Technical Specification.pdf', '/docs/spec.pdf'),
-    ('doc2-alpenblick', 'alpenblick', 'opp1-alpenblick', 'Market Analysis.xlsx', '/docs/market.xlsx');`);
+    ('doc1-t-academy-rmacek', 't-academy-rmacek', 'opp1-t-academy-rmacek', 'Technical Specification.pdf', '/docs/spec.pdf');`);
 
   await db.run(`INSERT OR IGNORE INTO conversations (id, tenantId, salesOpportunityId, title, aidaConversationId) VALUES
-    ('conv1-nordstern', 'nordstern', 'opp1-nordstern', 'Product Discussion', 'conv-aidanord'),
-    ('conv2-alpenblick', 'alpenblick', 'opp1-alpenblick', 'Pricing Strategy', 'conv-aidaalp');`);
+    ('conv1-t-academy-rmacek', 't-academy-rmacek', 'opp1-t-academy-rmacek', 'Product Discussion', 'conv-aidanord');`);
 
   await db.run(`INSERT OR IGNORE INTO artifacts (id, tenantId, salesOpportunityId, conversationId, type, content) VALUES
-    ('art1-nordstern', 'nordstern', 'opp1-nordstern', 'conv1-nordstern', 'summary', 'Client needs custom integration.'),
-    ('art2-alpenblick', 'alpenblick', 'opp1-alpenblick', 'conv2-alpenblick', 'recommendation', 'Consider tiered pricing model.');`);
+    ('art1-t-academy-rmacek', 't-academy-rmacek', 'opp1-t-academy-rmacek', 'conv1-t-academy-rmacek', 'summary', 'Client needs custom integration.');`);
 }
 
 // Initialize on module load
