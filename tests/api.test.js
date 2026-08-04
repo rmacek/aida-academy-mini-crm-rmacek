@@ -1,54 +1,76 @@
 import test from 'node:test';
-import assert from 'node:assert';
-import { db } from '../database.js';
+import assert from 'node:assert/strict';
+import { createDatabase } from '../database.js';
+import { createMiniCrmServer } from '../server.js';
 
-// Test API contract compliance with database operations
-await test('API can read sales opportunities', () => {
-  const opportunities = db.all('SELECT * FROM salesOpportunities');
-  assert.ok(Array.isArray(opportunities));
-  assert.equal(opportunities.length, 2);
+async function withServer(run) {
+  const database = createDatabase(':memory:');
+  const server = createMiniCrmServer({
+    database,
+    aidaAdapter: { isConfigured: false, chat: async () => ({ ok: false, statusCode: 503 }) }
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  try { await run(baseUrl); }
+  finally {
+    await new Promise(resolve => server.close(resolve));
+    database.close();
+  }
+}
+
+test('standalone page and trusted context contract are available', async () => {
+  await withServer(async baseUrl => {
+    const page = await fetch(`${baseUrl}/aida-crm`);
+    assert.equal(page.status, 200);
+    assert.match(page.headers.get('content-security-policy'), /frame-ancestors 'none'/u);
+    assert.match(await page.text(), /AIDA Mini CRM/u);
+
+    const response = await fetch(`${baseUrl}/api/context`);
+    assert.equal(response.status, 200);
+    const context = await response.json();
+    assert.deepEqual(context.tenant, { id: 'academy-rmacek', name: 'Academy - rmacek' });
+    assert.equal(context.copilotConfigured, false);
+    assert.equal(context.opportunities.length, 2);
+  });
 });
 
-await test('API can read appointments with proper tenant isolation', () => {
-  const appointments = db.all(
-    'SELECT * FROM appointments WHERE tenantId = ? AND salesOpportunityId = ?',
-    ['tenant-nordstern', 'opp-1']
-  );
+test('CRUD writes stay within the active sales opportunity', async () => {
+  await withServer(async baseUrl => {
+    const created = await fetch(`${baseUrl}/api/opportunities/opp-nordstern/notes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Workshop-Folgepunkt', content: 'Pilotumfang bestätigen.' })
+    });
+    assert.equal(created.status, 201);
 
-  assert.ok(Array.isArray(appointments));
-  assert.equal(appointments.length, 1);
-  assert.equal(appointments[0].title, 'Project Kickoff Meeting');
+    const nordstern = await fetch(`${baseUrl}/api/opportunities/opp-nordstern`).then(item => item.json());
+    const alpenblick = await fetch(`${baseUrl}/api/opportunities/opp-alpenblick`).then(item => item.json());
+    assert.ok(nordstern.notes.some(note => note.title === 'Workshop-Folgepunkt'));
+    assert.ok(!alpenblick.notes.some(note => note.title === 'Workshop-Folgepunkt'));
+
+    const todo = nordstern.todos[0];
+    const updated = await fetch(
+      `${baseUrl}/api/opportunities/opp-nordstern/todos/${encodeURIComponent(todo.id)}`,
+      {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ completed: true })
+      }
+    );
+    assert.equal(updated.status, 200);
+    const after = await fetch(`${baseUrl}/api/opportunities/opp-nordstern`).then(item => item.json());
+    assert.equal(after.todos[0].completed, true);
+  });
 });
 
-await test('API can read todos with proper scope', () => {
-  const todos = db.all(
-    'SELECT * FROM todos WHERE tenantId = ? AND salesOpportunityId = ?',
-    ['tenant-alpenblick', 'opp-2']
-  );
-
-  assert.ok(Array.isArray(todos));
-  assert.equal(todos.length, 1);
-  assert.equal(todos[0].title, 'Research local regulations');
-});
-
-await test('API can read notes with proper scope', () => {
-  const notes = db.all(
-    'SELECT * FROM notes WHERE tenantId = ? AND salesOpportunityId = ?',
-    ['tenant-nordstern', 'opp-1']
-  );
-
-  assert.ok(Array.isArray(notes));
-  assert.equal(notes.length, 1);
-  assert.equal(notes[0].title, 'Key stakeholders');
-});
-
-await test('API can read documents with proper scope', () => {
-  const documents = db.all(
-    'SELECT * FROM documents WHERE tenantId = ? AND salesOpportunityId = ?',
-    ['tenant-alpenblick', 'opp-2']
-  );
-
-  assert.ok(Array.isArray(documents));
-  assert.equal(documents.length, 1);
-  assert.equal(documents[0].name, 'Site Analysis Report.pdf');
+test('bounded JSON and validation errors are safe', async () => {
+  await withServer(async baseUrl => {
+    const response = await fetch(`${baseUrl}/api/opportunities/opp-nordstern/notes`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: '', content: '<script>alert(1)</script>' })
+    });
+    assert.equal(response.status, 400);
+    const body = await response.json();
+    assert.equal(body.error.code, 'invalid_request');
+    assert.doesNotMatch(JSON.stringify(body), /stack|sqlite|SELECT/iu);
+  });
 });

@@ -1,42 +1,50 @@
 import test from 'node:test';
-import assert from 'node:assert';
-import { db } from '../database.js';
+import assert from 'node:assert/strict';
+import { createDatabase } from '../database.js';
 
-// Test database wrapper methods
-await test('Database wrapper provides scalar method', () => {
-  const count = db.scalar('SELECT COUNT(*) FROM salesOpportunities');
-  assert.equal(typeof count, 'number');
+test('database wrapper supports scalar, get, all, run and array parameters', () => {
+  const database = createDatabase(':memory:');
+  try {
+    assert.equal(database.scalar(
+      'SELECT COUNT(*) AS count FROM sales_opportunities WHERE tenant_id = ?',
+      ['academy-rmacek']
+    ), 2);
+    assert.equal(database.get(
+      'SELECT company FROM sales_opportunities WHERE tenant_id = ? AND id = ?',
+      'academy-rmacek', 'opp-nordstern'
+    ).company, 'Nordstern Maschinenbau GmbH');
+    assert.equal(database.all(
+      'SELECT id FROM sales_opportunities WHERE tenant_id = ? ORDER BY id',
+      'academy-rmacek'
+    ).length, 2);
+    const result = database.run(
+      `UPDATE sales_opportunities SET next_step = ?
+        WHERE tenant_id = ? AND id = ?`,
+      'Validierter nächster Schritt', 'academy-rmacek', 'opp-nordstern'
+    );
+    assert.equal(Number(result.changes), 1);
+    assert.doesNotThrow(() => database.exec('SELECT 1;'));
+  } finally {
+    database.close();
+  }
 });
 
-await test('Database wrapper provides get method', () => {
-  const result = db.get('SELECT * FROM salesOpportunities LIMIT 1');
-  assert.ok(result);
-  assert.ok(result.id);
-});
-
-await test('Database wrapper provides all method', () => {
-  const results = db.all('SELECT id FROM salesOpportunities');
-  assert.ok(Array.isArray(results));
-  assert.ok(results.length > 0);
-});
-
-await test('Database wrapper provides run method', () => {
-  const result = db.run('UPDATE salesOpportunities SET name = ? WHERE id = ?', ['Updated Name', 'opp-1']);
-  assert.ok(result);
-});
-
-await test('Database wrapper provides exec method', () => {
-  const result = db.exec('SELECT * FROM salesOpportunities');
-  assert.ok(result);
-});
-
-await test('Database wrapper handles complex queries correctly', () => {
-  const result = db.all(
-    'SELECT s.id, s.name, COUNT(a.id) as appointmentCount
-     FROM salesOpportunities s
-     LEFT JOIN appointments a ON s.id = a.salesOpportunityId
-     GROUP BY s.id, s.name'
-  );
-  assert.ok(Array.isArray(result));
-  assert.ok(result.length > 0);
+test('synthetic opportunities share one tenant and keep scoped documents separate', () => {
+  const database = createDatabase(':memory:');
+  try {
+    const tenants = database.all(
+      'SELECT DISTINCT tenant_id AS tenantId FROM sales_opportunities'
+    );
+    assert.equal(tenants.length, 1);
+    assert.equal(tenants[0].tenantId, 'academy-rmacek');
+    const nordsternDocuments = database.all(
+      `SELECT name, content FROM documents
+        WHERE tenant_id = ? AND sales_opportunity_id = ?`,
+      'academy-rmacek', 'opp-nordstern'
+    );
+    assert.equal(nordsternDocuments.length, 1);
+    assert.doesNotMatch(nordsternDocuments[0].content, /ALPENBLICK-INTERNAL-ONLY/u);
+  } finally {
+    database.close();
+  }
 });

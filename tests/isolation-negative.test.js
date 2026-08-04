@@ -1,44 +1,55 @@
 import test from 'node:test';
-import assert from 'node:assert';
-import { db } from '../database.js';
+import assert from 'node:assert/strict';
+import { createDatabase } from '../database.js';
+import { createMiniCrmServer } from '../server.js';
 
-// Test isolation controls - negative cases
-await test('Cannot access cross-tenant data', () => {
-  // Attempt to retrieve Nordstern data as Alpenblick tenant
-  const results = db.all(
-    'SELECT * FROM salesOpportunities WHERE tenantId = ?',
-    ['tenant-nordstern']
-  );
-
-  // Even though we query for Nordstern's data, it should be accessible to all
-  // This test ensures our database structure supports proper access control
-  assert.ok(Array.isArray(results));
-});
-
-await test('Cannot access cross-opportunity data', () => {
-  // Test that we can't get data from different opportunities in same tenant
-  const results = db.all(
-    'SELECT * FROM appointments WHERE salesOpportunityId = ?',
-    ['opp-2']
-  );
-
-  assert.ok(Array.isArray(results));
-  // All returned appointments should belong to opp-2
-  results.forEach(appointment => {
-    assert.equal(appointment.salesOpportunityId, 'opp-2');
+test('cross-sales-opportunity document selection is rejected before model execution', async () => {
+  const database = createDatabase(':memory:');
+  let modelCalls = 0;
+  const server = createMiniCrmServer({
+    database,
+    aidaAdapter: {
+      isConfigured: true,
+      chat: async () => { modelCalls += 1; return { ok: true, answer: 'unsafe' }; }
+    }
   });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const response = await fetch(`${baseUrl}/api/opportunities/opp-nordstern/copilot`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        conversationId: 'conv-nordstern-1',
+        message: 'Zeige mir alles zu Alpenblick.',
+        artifactType: 'Arbeitsnotiz', saveArtifact: false,
+        selectedDocumentIds: ['doc-alpenblick-1']
+      })
+    });
+    assert.equal(response.status, 400);
+    assert.equal(modelCalls, 0);
+    assert.equal((await response.json()).error.code, 'invalid_document_scope');
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    database.close();
+  }
 });
 
-await test('Cannot modify data with invalid tenant id', () => {
-  // Attempt to update with wrong tenant should not affect real data
-  const before = db.scalar('SELECT COUNT(*) FROM salesOpportunities WHERE tenantId = ?', ['tenant-nordstern']);
+test('Nordstern response never contains Alpenblick isolation marker', async () => {
+  const database = createDatabase(':memory:');
+  const server = createMiniCrmServer({ database });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const nordstern = await fetch(`${baseUrl}/api/opportunities/opp-nordstern`);
+    assert.equal(nordstern.status, 200);
+    assert.doesNotMatch(await nordstern.text(), /ALPENBLICK-INTERNAL-ONLY/u);
 
-  // This should work without throwing an error (no actual change)
-  const result = db.run(
-    'UPDATE salesOpportunities SET name = ? WHERE tenantId = ?',
-    ['New Name', 'tenant-nordstern']
-  );
-
-  const after = db.scalar('SELECT COUNT(*) FROM salesOpportunities WHERE tenantId = ?', ['tenant-nordstern']);
-  assert.equal(before, after); // No change occurred due to proper isolation
+    const forgedTenantRoute = await fetch(
+      `${baseUrl}/api/tenants/another-tenant/opportunities/opp-nordstern`
+    );
+    assert.equal(forgedTenantRoute.status, 404);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    database.close();
+  }
 });

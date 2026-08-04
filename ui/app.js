@@ -1,263 +1,431 @@
-// DOM elements
-const opportunityList = document.getElementById('opportunityList');
-const workspace = document.getElementById('workspace');
-const tenantButtons = document.querySelectorAll('.tenant-btn');
+const state = {
+  context: null,
+  details: null,
+  activeOpportunityId: null,
+  activeConversationId: null,
+  activeSection: 'overview'
+};
 
-let currentTenantId = 'tenant-nordstern';
-let currentOpportunityId = null;
+const byId = id => document.getElementById(id);
 
-// Initialize the app
-async function init() {
-  await loadSalesOpportunities(currentTenantId);
+function el(tag, options = {}, children = []) {
+  const node = document.createElement(tag);
+  if (options.className) node.className = options.className;
+  if (options.text !== undefined) node.textContent = options.text;
+  if (options.type) node.type = options.type;
+  if (options.dataset) Object.assign(node.dataset, options.dataset);
+  if (options.attrs) {
+    for (const [name, value] of Object.entries(options.attrs)) node.setAttribute(name, value);
+  }
+  for (const child of children) node.append(child);
+  return node;
 }
 
-// Load sales opportunities for the given tenant
-async function loadSalesOpportunities(tenantId) {
+function replaceChildren(target, children) {
+  target.replaceChildren(...children);
+}
+
+function emptyState(message) {
+  return el('div', { className: 'empty-state', text: message });
+}
+
+function formatDate(value, withTime = true) {
+  if (!value) return 'Nicht terminiert';
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) return 'Ungültiger Termin';
+  return new Intl.DateTimeFormat('de-AT', {
+    dateStyle: 'medium', ...(withTime ? { timeStyle: 'short' } : {})
+  }).format(date);
+}
+
+function formatCurrency(value) {
+  return new Intl.NumberFormat('de-AT', {
+    style: 'currency', currency: 'EUR', maximumFractionDigits: 0
+  }).format(value || 0);
+}
+
+async function api(path, options = {}) {
+  const response = await fetch(path, {
+    ...options,
+    headers: options.body ? { 'Content-Type': 'application/json' } : undefined
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body.error?.message || 'Die Anfrage ist fehlgeschlagen.');
+  }
+  return body;
+}
+
+let toastTimer;
+function toast(message, isError = false) {
+  const target = byId('toast');
+  target.textContent = message;
+  target.classList.toggle('is-error', isError);
+  target.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { target.hidden = true; }, 5000);
+}
+
+function setLoading(loading) {
+  byId('loading-state').hidden = !loading;
+  if (loading) byId('error-state').hidden = true;
+}
+
+function showError(error) {
+  const target = byId('error-state');
+  target.textContent = error.message || String(error);
+  target.hidden = false;
+}
+
+async function initialize() {
   try {
-    const response = await fetch(`/api/tenants/${tenantId}/opportunities`);
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+    state.context = await api('/api/context');
+    byId('tenant-name').textContent = state.context.tenant.name;
+    const status = byId('copilot-status');
+    status.textContent = state.context.copilotConfigured
+      ? 'Copilot verbunden' : 'Copilot noch nicht verbunden';
+    status.classList.toggle('is-ready', state.context.copilotConfigured);
+    renderOpportunitySwitcher();
+    const remembered = localStorage.getItem('mini-crm-opportunity');
+    const initial = state.context.opportunities.find(item => item.id === remembered)
+      || state.context.opportunities[0];
+    if (initial) await loadOpportunity(initial.id);
+    else {
+      setLoading(false);
+      byId('active-opportunity-name').textContent = 'Neue Verkaufschance anlegen';
+      byId('opportunity-dialog').showModal();
     }
-
-    const data = await response.json();
-    renderOpportunityList(data.opportunities);
   } catch (error) {
-    console.error('Error loading opportunities:', error);
-    opportunityList.innerHTML = '<p>Error loading opportunities</p>';
+    setLoading(false);
+    showError(error);
   }
 }
 
-// Render the list of sales opportunities
-function renderOpportunityList(opportunities) {
-  opportunityList.innerHTML = '';
-
-  if (opportunities.length === 0) {
-    opportunityList.innerHTML = '<p>No opportunities found</p>';
-    return;
-  }
-
-  const list = document.createElement('ul');
-  list.className = 'opportunity-list';
-
-  opportunities.forEach(opportunity => {
-    const listItem = document.createElement('li');
-    listItem.className = 'opportunity-item';
-    listItem.dataset.id = opportunity.id;
-
-    listItem.innerHTML = `
-      <h3>${opportunity.name}</h3>
-      <p>Status: ${opportunity.status}</p>
-      <button class="select-opportunity-btn" data-id="${opportunity.id}">View Details</button>
-    `;
-
-    list.appendChild(listItem);
-  });
-
-  opportunityList.appendChild(list);
-
-  // Add event listeners to the buttons
-  document.querySelectorAll('.select-opportunity-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const id = btn.dataset.id;
-      loadOpportunityDetails(id);
-    });
-  });
-}
-
-// Load details for a specific opportunity
-async function loadOpportunityDetails(opportunityId) {
+async function loadOpportunity(opportunityId) {
+  setLoading(true);
   try {
-    currentOpportunityId = opportunityId;
-
-    // Fetch conversations
-    const conversationResponse = await fetch(`/api/tenants/${currentTenantId}/opportunities/${opportunityId}/conversations`);
-    const conversationData = await conversationResponse.json();
-
-    // Fetch artifacts
-    const artifactResponse = await fetch(`/api/tenants/${currentTenantId}/opportunities/${opportunityId}/artifacts`);
-    const artifactData = await artifactResponse.json();
-
-    renderWorkspace(opportunityId, conversationData.conversations, artifactData.artifacts);
+    state.details = await api(`/api/opportunities/${encodeURIComponent(opportunityId)}`);
+    state.activeOpportunityId = opportunityId;
+    localStorage.setItem('mini-crm-opportunity', opportunityId);
+    const availableConversation = state.details.conversations.find(
+      item => item.id === state.activeConversationId
+    ) || state.details.conversations[0] || null;
+    state.activeConversationId = availableConversation?.id || null;
+    renderAll();
+    setLoading(false);
   } catch (error) {
-    console.error('Error loading opportunity details:', error);
-    workspace.innerHTML = '<p>Error loading opportunity details</p>';
+    setLoading(false);
+    showError(error);
   }
 }
 
-// Render the workspace with tabs
-function renderWorkspace(opportunityId, conversations, artifacts) {
-  workspace.innerHTML = `
-    <div class="workspace-header">
-      <h2>Sales Opportunity: ${opportunityId}</h2>
-      <div class="tab-container">
-        <button class="tab-btn active" data-tab="activities">Activities</button>
-        <button class="tab-btn" data-tab="documents">Documents</button>
-        <button class="tab-btn" data-tab="conversations">Conversations</button>
-        <button class="tab-btn" data-tab="artifacts">Artifacts</button>
-      </div>
-    </div>
+function renderAll() {
+  const data = state.details;
+  const opportunity = data.opportunity;
+  byId('active-opportunity-name').textContent = `${opportunity.company} · ${opportunity.name}`;
+  byId('overview-title').textContent = opportunity.name;
+  byId('opportunity-description').textContent = `${opportunity.company} – ${opportunity.description}`;
+  byId('opportunity-status').textContent = opportunity.status;
+  byId('metric-value').textContent = formatCurrency(opportunity.valueEur);
+  byId('metric-todos').textContent = String(data.todos.filter(item => !item.completed).length);
+  byId('metric-appointment').textContent = data.appointments[0]
+    ? formatDate(data.appointments[0].scheduledAt) : 'Kein Termin';
+  byId('metric-artifacts').textContent = String(data.artifacts.length);
+  byId('next-step').textContent = opportunity.nextStep || 'Nächsten Schritt festlegen';
+  renderTimeline();
+  renderAppointments();
+  renderTodos();
+  renderNotes();
+  renderDocuments();
+  renderConversations();
+  renderArtifacts();
+  renderOpportunitySwitcher();
+}
 
-    <div class="tab-content">
-      <!-- Activities content will be populated here -->
-    </div>
-  `;
+function renderTimeline() {
+  const entries = [
+    ...state.details.appointments.map(item => ({ date: item.createdAt, text: `Termin: ${item.title}` })),
+    ...state.details.notes.map(item => ({ date: item.createdAt, text: `Notiz: ${item.title}` })),
+    ...state.details.documents.map(item => ({ date: item.createdAt, text: `Dokument: ${item.name}` })),
+    ...state.details.artifacts.map(item => ({ date: item.createdAt, text: `KI-Artefakt: ${item.title}` }))
+  ].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 5);
+  replaceChildren(byId('timeline-list'), entries.length
+    ? entries.map(entry => el('li', {}, [
+      el('span', { text: formatDate(entry.date) }),
+      el('strong', { text: entry.text })
+    ]))
+    : [emptyState('Noch keine Aktivitäten vorhanden.')]);
+}
 
-  // Add event listeners to tab buttons
-  document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const tab = btn.dataset.tab;
-      showTab(tab, conversations, artifacts);
+function renderAppointments() {
+  const items = state.details.appointments.map(appointment =>
+    el('article', { className: 'list-card' }, [
+      el('div', {}, [el('strong', { text: appointment.title }),
+        el('span', { text: `${formatDate(appointment.scheduledAt)} · ${appointment.durationMinutes} Minuten` })]),
+      el('span', { className: 'list-meta', text: appointment.location || 'Ohne Ortsangabe' })
+    ]));
+  byId('appointment-count').textContent = String(items.length);
+  replaceChildren(byId('appointment-list'), items.length ? items : [emptyState('Noch kein Termin geplant.')]);
+}
+
+function renderTodos() {
+  const items = state.details.todos.map(todo => {
+    const checkbox = el('input', { type: 'checkbox', attrs: { 'aria-label': `Aufgabe ${todo.title} erledigt` } });
+    checkbox.checked = todo.completed;
+    checkbox.addEventListener('change', async () => {
+      try {
+        await api(`/api/opportunities/${encodeURIComponent(state.activeOpportunityId)}/todos/${encodeURIComponent(todo.id)}`, {
+          method: 'PATCH', body: JSON.stringify({ completed: checkbox.checked })
+        });
+        await loadOpportunity(state.activeOpportunityId);
+        toast('Aufgabe aktualisiert.');
+      } catch (error) { checkbox.checked = !checkbox.checked; toast(error.message, true); }
     });
+    return el('label', { className: `todo-card${todo.completed ? ' is-complete' : ''}` }, [
+      checkbox,
+      el('span', {}, [el('strong', { text: todo.title }),
+        el('small', { text: todo.dueAt ? `Fällig: ${formatDate(todo.dueAt)}` : 'Ohne Fälligkeit' })])
+    ]);
   });
-
-  // Show initial tab
-  showTab('activities', conversations, artifacts);
+  byId('todo-count').textContent = String(items.length);
+  replaceChildren(byId('todo-list'), items.length ? items : [emptyState('Keine offenen Aufgaben.')]);
 }
 
-// Show content for a specific tab
-function showTab(tabName, conversations, artifacts) {
-  const tabContent = document.querySelector('.tab-content');
-
-  switch (tabName) {
-    case 'activities':
-      tabContent.innerHTML = '<p>Activities will be displayed here</p>';
-      break;
-    case 'documents':
-      tabContent.innerHTML = '<p>Documents will be displayed here</p>';
-      break;
-    case 'conversations':
-      renderConversations(conversations);
-      break;
-    case 'artifacts':
-      renderArtifacts(artifacts);
-      break;
-  }
-
-  // Update active tab button
-  document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.tab === tabName);
-  });
+function renderNotes() {
+  const items = state.details.notes.map(note => el('article', { className: 'text-card' }, [
+    el('div', { className: 'card-title-row' }, [el('strong', { text: note.title }), el('time', { text: formatDate(note.createdAt, false) })]),
+    el('p', { text: note.content })
+  ]));
+  byId('note-count').textContent = String(items.length);
+  replaceChildren(byId('note-list'), items.length ? items : [emptyState('Noch keine Notizen vorhanden.')]);
 }
 
-// Render conversations in the UI
-function renderConversations(conversations) {
-  const tabContent = document.querySelector('.tab-content');
-
-  if (conversations.length === 0) {
-    tabContent.innerHTML = '<p>No conversations found</p>';
-    return;
-  }
-
-  let html = '<div class="conversation-list">
-    <button id="new-conversation-btn" class="btn primary">New Conversation</button>
-  ';
-
-  conversations.forEach(conv => {
-    html += `
-      <div class="conversation-item">
-        <h3>${conv.title}</h3>
-        <p>Created: ${new Date(conv.createdAt).toLocaleString()}</p>
-        <button class="btn" data-conversation-id="${conv.id}">View Messages</button>
-      </div>
-    `;
+function renderDocuments() {
+  const items = state.details.documents.map(document => {
+    const details = el('details', { className: 'document-card' }, [
+      el('summary', {}, [el('strong', { text: document.name }), el('span', { text: document.source })]),
+      el('p', { text: document.content })
+    ]);
+    return details;
   });
+  byId('document-count').textContent = String(items.length);
+  replaceChildren(byId('document-list'), items.length ? items : [emptyState('Noch keine Dokumente vorhanden.')]);
 
-  html += '</div>';
-  tabContent.innerHTML = html;
+  const checks = state.details.documents.map(document => {
+    const input = el('input', { type: 'checkbox' });
+    input.value = document.id;
+    input.name = 'selectedDocumentIds';
+    return el('label', { className: 'check-control' }, [input, el('span', { text: document.name })]);
+  });
+  replaceChildren(byId('copilot-documents'), checks.length ? checks : [
+    el('span', { className: 'field-hint', text: 'Keine Dokumente in dieser Verkaufschance.' })
+  ]);
+}
 
-  // Add event listeners to conversation buttons
-  document.querySelectorAll('.conversation-item .btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const id = btn.dataset.conversationId;
-      loadConversationMessages(id);
+function renderConversations() {
+  const buttons = state.details.conversations.map(conversation => {
+    const button = el('button', {
+      type: 'button', className: conversation.id === state.activeConversationId ? 'is-active' : '',
+      attrs: { 'aria-pressed': String(conversation.id === state.activeConversationId) }
+    }, [el('strong', { text: conversation.title }), el('span', { text: `${conversation.messages.length} Nachrichten` })]);
+    button.addEventListener('click', () => {
+      state.activeConversationId = conversation.id;
+      renderConversations();
     });
+    return button;
   });
+  replaceChildren(byId('conversation-list'), buttons.length ? buttons : [emptyState('Starten Sie eine neue Unterhaltung.')]);
 
-  // Add event listener for new conversation button
-  document.getElementById('new-conversation-btn').addEventListener('click', createNewConversation);
+  const active = state.details.conversations.find(item => item.id === state.activeConversationId);
+  byId('chat-heading').querySelector('h2').textContent = active?.title || 'Unterhaltung auswählen';
+  const messages = active?.messages.map(message => el('article', {
+    className: `message ${message.role === 'assistant' ? 'assistant' : 'user'}`
+  }, [
+    el('div', { className: 'message-meta', text: message.role === 'assistant' ? 'Opportunity Copilot' : 'Sie' }),
+    el('p', { text: message.content }),
+    el('time', { text: formatDate(message.createdAt) })
+  ])) || [];
+  replaceChildren(byId('message-list'), messages.length ? messages : [
+    emptyState(active ? 'Stellen Sie die erste Frage in dieser Unterhaltung.' : 'Wählen oder erstellen Sie eine Unterhaltung.')
+  ]);
+  byId('copilot-form').querySelectorAll('textarea, input, select, button').forEach(control => {
+    if (!control.closest('.quick-actions')) control.disabled = !active;
+  });
 }
 
-// Render artifacts in the UI
-function renderArtifacts(artifacts) {
-  const tabContent = document.querySelector('.tab-content');
-
-  if (artifacts.length === 0) {
-    tabContent.innerHTML = '<p>No artifacts found</p>';
-    return;
-  }
-
-  let html = '<div class="artifact-list">';
-
-  artifacts.forEach(artifact => {
-    html += `
-      <div class="artifact-item">
-        <h3>${artifact.name}</h3>
-        <p>Type: ${artifact.type}</p>
-        <p>Created: ${new Date(artifact.createdAt).toLocaleString()}</p>
-        <pre class="artifact-content">${artifact.content.substring(0, 200)}...</pre>
-      </div>
-    `;
+function renderArtifacts() {
+  const items = state.details.artifacts.map(artifact => {
+    const sourceList = el('ul', { className: 'source-list' },
+      artifact.sources.map(source => el('li', { text: source })));
+    return el('article', { className: 'artifact-card' }, [
+      el('div', { className: 'artifact-heading' }, [
+        el('span', { className: 'artifact-type', text: artifact.type }),
+        el('time', { text: formatDate(artifact.createdAt) })
+      ]),
+      el('h2', { text: artifact.title }),
+      el('p', { className: 'artifact-preview', text: artifact.content }),
+      el('details', {}, [
+        el('summary', { text: 'Evidenz und Quellen' }),
+        el('dl', { className: 'evidence-grid' }, [
+          el('dt', { text: 'Assistent' }), el('dd', { text: artifact.assistantRelease }),
+          el('dt', { text: 'Modellprofil' }), el('dd', { text: artifact.modelProfile }),
+          el('dt', { text: 'Modell' }), el('dd', { text: artifact.modelName }),
+          el('dt', { text: 'Konfidenz' }), el('dd', { text: artifact.confidence })
+        ]), sourceList
+      ])
+    ]);
   });
-
-  html += '</div>';
-  tabContent.innerHTML = html;
+  replaceChildren(byId('artifact-list'), items.length ? items : [emptyState('Noch keine KI-Ergebnisse als Artefakt gespeichert.')]);
 }
 
-// Load messages for a specific conversation
-async function loadConversationMessages(conversationId) {
+function renderOpportunitySwitcher() {
+  if (!state.context) return;
+  const buttons = state.context.opportunities.map(opportunity => {
+    const button = el('button', {
+      type: 'button',
+      className: opportunity.id === state.activeOpportunityId ? 'is-active' : ''
+    }, [
+      el('span', {}, [el('strong', { text: opportunity.company }), el('small', { text: opportunity.name })]),
+      el('span', { className: 'stage-badge', text: opportunity.status })
+    ]);
+    button.addEventListener('click', async () => {
+      byId('opportunity-dialog').close();
+      state.activeConversationId = null;
+      await loadOpportunity(opportunity.id);
+      toast(`Kontext gewechselt: ${opportunity.company}`);
+    });
+    return button;
+  });
+  replaceChildren(byId('opportunity-list'), buttons.length ? buttons : [emptyState('Noch keine Verkaufschance vorhanden.')]);
+}
+
+function showSection(section) {
+  state.activeSection = section;
+  document.querySelectorAll('.workspace-section').forEach(node => {
+    node.hidden = node.id !== `section-${section}`;
+  });
+  document.querySelectorAll('[data-section]').forEach(button => {
+    button.classList.toggle('is-active', button.dataset.section === section);
+  });
+  byId(`section-${section}`).querySelector('h1')?.focus?.({ preventScroll: true });
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function formJson(form) {
+  return Object.fromEntries(new FormData(form).entries());
+}
+
+function bindCreateForm(formId, subpath, transform = value => value) {
+  byId(formId).addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const submit = form.querySelector('button[type="submit"]');
+    submit.disabled = true;
+    try {
+      const body = transform(formJson(form));
+      await api(`/api/opportunities/${encodeURIComponent(state.activeOpportunityId)}/${subpath}`, {
+        method: 'POST', body: JSON.stringify(body)
+      });
+      form.reset();
+      await loadOpportunity(state.activeOpportunityId);
+      toast('Eintrag gespeichert.');
+    } catch (error) { toast(error.message, true); }
+    finally { submit.disabled = false; }
+  });
+}
+
+document.querySelectorAll('[data-section]').forEach(button => {
+  button.addEventListener('click', () => showSection(button.dataset.section));
+});
+document.querySelectorAll('[data-go]').forEach(button => {
+  button.addEventListener('click', () => showSection(button.dataset.go));
+});
+byId('open-switcher').addEventListener('click', () => byId('opportunity-dialog').showModal());
+byId('close-switcher').addEventListener('click', () => byId('opportunity-dialog').close());
+byId('opportunity-dialog').addEventListener('click', event => {
+  if (event.target === byId('opportunity-dialog')) byId('opportunity-dialog').close();
+});
+
+byId('opportunity-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
   try {
-    const response = await fetch(`/api/tenants/${currentTenantId}/opportunities/${currentOpportunityId}/conversations/${conversationId}/chat`);
-    const data = await response.json();
+    const result = await api('/api/opportunities', {
+      method: 'POST', body: JSON.stringify(formJson(form))
+    });
+    state.context = await api('/api/context');
+    form.reset();
+    byId('opportunity-dialog').close();
+    await loadOpportunity(result.opportunity.id);
+    toast('Verkaufschance angelegt.');
+  } catch (error) { toast(error.message, true); }
+});
 
-    // Display messages in a modal or new view
-    alert('Conversation messages loaded. In a real implementation, these would be displayed in a proper UI.');
-  } catch (error) {
-    console.error('Error loading conversation messages:', error);
-    alert('Error loading conversation messages');
-  }
-}
+bindCreateForm('appointment-form', 'appointments', value => ({
+  ...value,
+  scheduledAt: value.scheduledAt ? new Date(value.scheduledAt).toISOString() : '',
+  durationMinutes: Number(value.durationMinutes)
+}));
+bindCreateForm('todo-form', 'todos', value => ({
+  ...value, dueAt: value.dueAt ? new Date(value.dueAt).toISOString() : null
+}));
+bindCreateForm('note-form', 'notes');
+bindCreateForm('document-form', 'documents');
 
-// Create a new conversation
-async function createNewConversation() {
-  const title = prompt('Enter conversation title:');
-
+byId('new-conversation').addEventListener('click', async () => {
+  const title = window.prompt('Titel der neuen Unterhaltung:');
   if (!title) return;
-
   try {
-    const response = await fetch(`/api/tenants/${currentTenantId}/opportunities/${currentOpportunityId}/conversations`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ title })
+    const result = await api(`/api/opportunities/${encodeURIComponent(state.activeOpportunityId)}/conversations`, {
+      method: 'POST', body: JSON.stringify({ title })
     });
+    state.activeConversationId = result.conversation.id;
+    await loadOpportunity(state.activeOpportunityId);
+    toast('Unterhaltung angelegt.');
+  } catch (error) { toast(error.message, true); }
+});
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const data = await response.json();
-    alert('Conversation created successfully');
-    loadOpportunityDetails(currentOpportunityId);
-  } catch (error) {
-    console.error('Error creating conversation:', error);
-    alert('Error creating conversation');
-  }
-}
-
-// Event listeners for tenant buttons
-tenantButtons.forEach(button => {
+document.querySelectorAll('.quick-actions button').forEach(button => {
   button.addEventListener('click', () => {
-    currentTenantId = button.dataset.tenant;
-
-    // Update active button
-    tenantButtons.forEach(btn => btn.classList.remove('active'));
-    button.classList.add('active');
-
-    // Load opportunities for selected tenant
-    loadSalesOpportunities(currentTenantId);
+    byId('copilot-message').value = button.dataset.prompt;
+    byId('copilot-form').elements.artifactType.value = button.dataset.type;
+    byId('copilot-message').focus();
   });
 });
 
-// Initialize the app
-init();
+byId('copilot-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  if (!state.activeConversationId) {
+    toast('Bitte zuerst eine Unterhaltung anlegen.', true);
+    return;
+  }
+  const form = event.currentTarget;
+  const submit = byId('send-copilot');
+  submit.disabled = true;
+  submit.textContent = 'AIDA arbeitet …';
+  const data = formJson(form);
+  const selectedDocumentIds = [...form.querySelectorAll('input[name="selectedDocumentIds"]:checked')]
+    .map(input => input.value);
+  try {
+    await api(`/api/opportunities/${encodeURIComponent(state.activeOpportunityId)}/copilot`, {
+      method: 'POST',
+      body: JSON.stringify({
+        conversationId: state.activeConversationId,
+        message: data.message,
+        artifactType: data.artifactType,
+        artifactTitle: data.artifactTitle,
+        saveArtifact: form.elements.saveArtifact.checked,
+        selectedDocumentIds
+      })
+    });
+    form.elements.message.value = '';
+    await loadOpportunity(state.activeOpportunityId);
+    toast('AIDA-Entwurf wurde erstellt und im aktiven Kontext gespeichert.');
+  } catch (error) { toast(error.message, true); }
+  finally {
+    submit.disabled = false;
+    submit.textContent = 'Entwurf erstellen';
+  }
+});
+
+initialize();

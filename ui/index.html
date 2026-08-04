@@ -1,34 +1,226 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="de">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mini CRM</title>
-  <link rel="stylesheet" href="styles.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AIDA Mini CRM</title>
+  <link rel="stylesheet" href="/aida-crm/styles.css">
 </head>
 <body>
-  <div class="app-container">
-    <header class="app-header">
-      <h1>Mini CRM</h1>
-      <nav class="tenant-nav">
-        <button id="tenant-nordstern" class="tenant-btn active" data-tenant="tenant-nordstern">Nordstern</button>
-        <button id="tenant-alpenblick" class="tenant-btn" data-tenant="tenant-alpenblick">Alpenblick</button>
-      </nav>
-    </header>
+  <a class="skip-link" href="#main-content">Zum Inhalt springen</a>
 
-    <main class="app-main">
-      <div class="sidebar">
-        <div class="sales-opportunity-list" id="opportunityList">
-          <!-- Opportunity list will be populated by JavaScript -->
+  <header class="context-header">
+    <div class="brand-block">
+      <span class="brand-mark" aria-hidden="true">A</span>
+      <div>
+        <strong>AIDA Mini CRM</strong>
+        <span>Vertriebsarbeit mit sicherem KI-Kontext</span>
+      </div>
+    </div>
+    <div class="context-boundary" aria-label="Aktiver Arbeitskontext">
+      <span class="context-label">Tenant</span>
+      <strong id="tenant-name">Wird geladen …</strong>
+      <span class="context-divider" aria-hidden="true"></span>
+      <span class="context-label">Aktive Verkaufschance</span>
+      <button id="open-switcher" class="context-button" type="button"
+              aria-haspopup="dialog">
+        <span id="active-opportunity-name">Bitte auswählen</span>
+        <span aria-hidden="true">⌄</span>
+      </button>
+    </div>
+    <div id="copilot-status" class="status-pill">Copilot wird geprüft</div>
+  </header>
+
+  <div class="app-shell">
+    <nav class="side-nav" aria-label="Verkaufschance">
+      <p class="nav-eyebrow">Arbeitsbereiche</p>
+      <button class="nav-item is-active" type="button" data-section="overview">Überblick</button>
+      <button class="nav-item" type="button" data-section="activities">Termine & Aufgaben</button>
+      <button class="nav-item" type="button" data-section="notes">Notizen & Dokumente</button>
+      <button class="nav-item" type="button" data-section="copilot">Opportunity Copilot</button>
+      <button class="nav-item" type="button" data-section="artifacts">Artefakte</button>
+      <div class="boundary-note">
+        <strong>Kontextgrenze aktiv</strong>
+        <span>Alle Inhalte gehören ausschließlich zur oben gewählten Verkaufschance.</span>
+      </div>
+    </nav>
+
+    <main id="main-content" class="main-content" tabindex="-1">
+      <div id="loading-state" class="state-panel" role="status">
+        Verkaufschance wird geladen …
+      </div>
+      <div id="error-state" class="state-panel state-error" role="alert" hidden></div>
+
+      <section id="section-overview" class="workspace-section" aria-labelledby="overview-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Verkaufschance</p>
+            <h1 id="overview-title">Überblick</h1>
+            <p id="opportunity-description" class="section-copy"></p>
+          </div>
+          <span id="opportunity-status" class="stage-badge"></span>
         </div>
-      </div>
+        <div class="metric-grid">
+          <article class="metric-card"><span>Volumen</span><strong id="metric-value">–</strong></article>
+          <article class="metric-card"><span>Offene Aufgaben</span><strong id="metric-todos">–</strong></article>
+          <article class="metric-card"><span>Nächster Termin</span><strong id="metric-appointment">–</strong></article>
+          <article class="metric-card"><span>KI-Artefakte</span><strong id="metric-artifacts">–</strong></article>
+        </div>
+        <div class="content-grid two-columns">
+          <article class="panel">
+            <p class="eyebrow">Nächster Schritt</p>
+            <h2 id="next-step">–</h2>
+            <p>Nutzen Sie den Opportunity Copilot, um ein Briefing, einen E-Mail-Entwurf oder eine Risikoanalyse vorzubereiten.</p>
+            <button class="button primary" type="button" data-go="copilot">Mit KI vorbereiten</button>
+          </article>
+          <article class="panel">
+            <p class="eyebrow">Letzte Aktivitäten</p>
+            <h2>Chronik</h2>
+            <ol id="timeline-list" class="timeline"></ol>
+          </article>
+        </div>
+      </section>
 
-      <div class="workspace" id="workspace">
-        <!-- Workspace content will be populated by JavaScript -->
-      </div>
+      <section id="section-activities" class="workspace-section" aria-labelledby="activities-title" hidden>
+        <div class="section-heading"><div><p class="eyebrow">Planung</p><h1 id="activities-title">Termine & Aufgaben</h1></div></div>
+        <div class="content-grid two-columns">
+          <article class="panel">
+            <div class="panel-heading"><h2>Termine</h2><span id="appointment-count" class="count-badge">0</span></div>
+            <div id="appointment-list" class="item-list"></div>
+            <details class="create-box">
+              <summary>Termin hinzufügen</summary>
+              <form id="appointment-form" class="stack-form">
+                <label>Titel<input name="title" required maxlength="160"></label>
+                <label>Zeitpunkt<input name="scheduledAt" type="datetime-local" required></label>
+                <div class="form-row">
+                  <label>Dauer in Minuten<input name="durationMinutes" type="number" min="15" max="480" value="60"></label>
+                  <label>Ort<input name="location" maxlength="160"></label>
+                </div>
+                <label>Notizen<textarea name="notes" maxlength="2000"></textarea></label>
+                <button class="button primary" type="submit">Termin speichern</button>
+              </form>
+            </details>
+          </article>
+          <article class="panel">
+            <div class="panel-heading"><h2>Aufgaben</h2><span id="todo-count" class="count-badge">0</span></div>
+            <div id="todo-list" class="item-list"></div>
+            <details class="create-box">
+              <summary>Aufgabe hinzufügen</summary>
+              <form id="todo-form" class="stack-form">
+                <label>Aufgabe<input name="title" required maxlength="200"></label>
+                <label>Fällig am<input name="dueAt" type="datetime-local"></label>
+                <button class="button primary" type="submit">Aufgabe speichern</button>
+              </form>
+            </details>
+          </article>
+        </div>
+      </section>
+
+      <section id="section-notes" class="workspace-section" aria-labelledby="notes-title" hidden>
+        <div class="section-heading"><div><p class="eyebrow">Wissen zur Verkaufschance</p><h1 id="notes-title">Notizen & Dokumente</h1></div></div>
+        <div class="content-grid two-columns">
+          <article class="panel">
+            <div class="panel-heading"><h2>Notizen</h2><span id="note-count" class="count-badge">0</span></div>
+            <div id="note-list" class="item-list"></div>
+            <details class="create-box">
+              <summary>Notiz hinzufügen</summary>
+              <form id="note-form" class="stack-form">
+                <label>Titel<input name="title" required maxlength="160"></label>
+                <label>Inhalt<textarea name="content" required maxlength="8000"></textarea></label>
+                <button class="button primary" type="submit">Notiz speichern</button>
+              </form>
+            </details>
+          </article>
+          <article class="panel">
+            <div class="panel-heading"><h2>Dokumente</h2><span id="document-count" class="count-badge">0</span></div>
+            <div id="document-list" class="item-list"></div>
+            <details class="create-box">
+              <summary>Textdokument hinzufügen</summary>
+              <form id="document-form" class="stack-form">
+                <label>Dateiname<input name="name" required maxlength="200" placeholder="Kundenanforderungen.txt"></label>
+                <label>Inhalt<textarea name="content" required maxlength="30000"></textarea></label>
+                <label>Quelle<input name="source" maxlength="200" value="Workshop-Eingabe"></label>
+                <button class="button primary" type="submit">Dokument speichern</button>
+              </form>
+            </details>
+          </article>
+        </div>
+      </section>
+
+      <section id="section-copilot" class="workspace-section" aria-labelledby="copilot-title" hidden>
+        <div class="section-heading">
+          <div><p class="eyebrow">KI-Arbeitsbereich</p><h1 id="copilot-title">Opportunity Copilot</h1><p class="section-copy">Der aktive Kontext wird bei jeder Anfrage serverseitig neu geprüft.</p></div>
+          <button id="new-conversation" class="button secondary" type="button">Neue Unterhaltung</button>
+        </div>
+        <div class="copilot-layout">
+          <aside class="conversation-rail" aria-label="Unterhaltungen">
+            <h2>Unterhaltungen</h2>
+            <div id="conversation-list" class="conversation-list"></div>
+          </aside>
+          <article class="chat-panel">
+            <div id="chat-heading" class="chat-heading"><h2>Unterhaltung auswählen</h2><span class="trust-badge">Kontextisoliert</span></div>
+            <div id="message-list" class="message-list" aria-live="polite"></div>
+            <form id="copilot-form" class="copilot-form">
+              <fieldset id="document-selection">
+                <legend>Dokumente für diese Anfrage freigeben</legend>
+                <div id="copilot-documents" class="check-list"></div>
+              </fieldset>
+              <div class="quick-actions" aria-label="Schnelleinstiege">
+                <button type="button" data-prompt="Bereite ein kompaktes Briefing für den nächsten Kundentermin vor." data-type="Meeting-Briefing">Meeting-Briefing</button>
+                <button type="button" data-prompt="Entwirf eine freundliche Follow-up-E-Mail mit klaren nächsten Schritten." data-type="E-Mail-Entwurf">E-Mail-Entwurf</button>
+                <button type="button" data-prompt="Analysiere die wichtigsten Risiken dieser Verkaufschance und schlage Gegenmaßnahmen vor." data-type="Risikoanalyse">Risikoanalyse</button>
+              </div>
+              <label>Ihre Aufgabe<textarea id="copilot-message" name="message" required maxlength="8000" placeholder="Was soll AIDA für diese Verkaufschance vorbereiten?"></textarea></label>
+              <div class="form-row">
+                <label>Ergebnistyp
+                  <select name="artifactType">
+                    <option>Meeting-Briefing</option><option>E-Mail-Entwurf</option><option>Angebotsstruktur</option><option>Risikoanalyse</option><option>Arbeitsnotiz</option>
+                  </select>
+                </label>
+                <label>Artefakttitel<input name="artifactTitle" maxlength="180" placeholder="z. B. Briefing Lösungsworkshop"></label>
+              </div>
+              <label class="check-control"><input name="saveArtifact" type="checkbox" checked> Ergebnis als nachvollziehbares Artefakt speichern</label>
+              <div class="composer-actions">
+                <span>Keine Nachricht oder Aktion wird extern versendet.</span>
+                <button id="send-copilot" class="button primary" type="submit">Entwurf erstellen</button>
+              </div>
+            </form>
+          </article>
+        </div>
+      </section>
+
+      <section id="section-artifacts" class="workspace-section" aria-labelledby="artifacts-title" hidden>
+        <div class="section-heading"><div><p class="eyebrow">Nachvollziehbare Ergebnisse</p><h1 id="artifacts-title">Artefakte</h1><p class="section-copy">KI-Ergebnisse bleiben prüfbare Entwürfe mit Modell-, Quellen- und Zeitnachweis.</p></div></div>
+        <div id="artifact-list" class="artifact-grid"></div>
+      </section>
     </main>
   </div>
 
-  <script src="app.js"></script>
+  <nav class="mobile-nav" aria-label="Mobile Arbeitsbereiche">
+    <button class="is-active" type="button" data-section="overview">Überblick</button>
+    <button type="button" data-section="activities">Planung</button>
+    <button type="button" data-section="notes">Wissen</button>
+    <button type="button" data-section="copilot">Copilot</button>
+    <button type="button" data-section="artifacts">Artefakte</button>
+  </nav>
+
+  <dialog id="opportunity-dialog" aria-labelledby="switcher-title">
+    <div class="dialog-heading"><div><p class="eyebrow">Kontext wechseln</p><h2 id="switcher-title">Verkaufschance öffnen</h2></div><button id="close-switcher" class="icon-button" type="button" aria-label="Dialog schließen">×</button></div>
+    <p class="dialog-copy">Beim Wechsel werden ausschließlich Daten der gewählten Verkaufschance geladen.</p>
+    <div id="opportunity-list" class="opportunity-list"></div>
+    <details class="create-box">
+      <summary>Neue Verkaufschance anlegen</summary>
+      <form id="opportunity-form" class="stack-form">
+        <div class="form-row"><label>Name<input name="name" required maxlength="120"></label><label>Unternehmen<input name="company" required maxlength="120"></label></div>
+        <div class="form-row"><label>Status<input name="status" maxlength="60" value="Qualifizierung"></label><label>Volumen in EUR<input name="valueEur" type="number" min="0" max="100000000"></label></div>
+        <label>Beschreibung<textarea name="description" maxlength="2000"></textarea></label>
+        <label>Nächster Schritt<input name="nextStep" maxlength="500"></label>
+        <button class="button primary" type="submit">Verkaufschance anlegen und öffnen</button>
+      </form>
+    </details>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <script type="module" src="/aida-crm/app.js"></script>
 </body>
 </html>
