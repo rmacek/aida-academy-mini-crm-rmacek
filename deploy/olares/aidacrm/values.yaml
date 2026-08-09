@@ -4,7 +4,7 @@ workloads:
 
 image:
   repository: ghcr.io/rmacek/aida-academy-mini-crm
-  tag: 1.0.16
+  tag: 1.0.17
   pullPolicy: IfNotPresent
 
 olaresEnv:
